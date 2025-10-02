@@ -1,54 +1,82 @@
-from flask import Flask, request, render_template, send_file
+from flask import Flask, render_template, request, send_file
 import pandas as pd
 import os
 
 app = Flask(__name__)
+
+# Temporary upload folder
 UPLOAD_FOLDER = 'uploads'
-PROCESSED_FOLDER = 'processed'
-
-# Ensure folders exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-@app.route('/', methods=['GET', 'POST'])
+# Attendance marks function (same as your JS)
+def calculate_attendance_marks(percent):
+    if percent >= 90:
+        return 10
+    elif percent >= 85:
+        return 9
+    elif percent >= 80:
+        return 8
+    elif percent >= 75:
+        return 7
+    else:
+        return 6
+
+# Assignment marks function (same as your JS)
+def calculate_assignment_marks(count):
+    if count >= 5:
+        return 10
+    elif count == 4:
+        return 8
+    elif 1 <= count <= 3:
+        return 6
+    else:
+        return 0
+
+# Total marks calculation
+def calculate_total_marks(sess1, sess2, attendance_percent, assignment_count):
+    total_sess = sess1 + sess2
+    if total_sess > 30:  # Cap sessional at 30
+        total_sess = 30
+    attendance_marks = calculate_attendance_marks(attendance_percent)
+    assignment_marks = calculate_assignment_marks(assignment_count)
+    total = total_sess + attendance_marks + assignment_marks
+    return total
+
+@app.route('/')
 def index():
-    if request.method == 'POST':
-        file = request.files['file']
-        if file:
-            # Save uploaded file
-            filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-            file.save(filepath)
-
-            # Read Excel
-            df = pd.read_excel(filepath)
-
-            # Calculate Attendance marks
-            def attendance_marks(att):
-                if att >= 90: return 10
-                elif att >= 85: return 9
-                elif att >= 80: return 8
-                elif att >= 75: return 7
-                else: return 6
-
-            # Calculate Assignment marks
-            def assignment_marks(assign):
-                if assign == 5: return 10
-                elif assign == 4: return 8
-                elif assign in [1,2,3]: return 6
-                else: return 0
-
-            df['Attendance Marks'] = df['Attendance'].apply(attendance_marks)
-            df['Assignment Marks'] = df['Assignments'].apply(assignment_marks)
-            df['Total Marks'] = df['Session1'] + df['Session2'] + df['Attendance Marks'] + df['Assignment Marks']
-
-            # Save processed file
-            output_path = os.path.join(PROCESSED_FOLDER, 'Final_Marks.xlsx')
-            df.to_excel(output_path, index=False)
-
-            # Send file to user
-            return send_file(output_path, as_attachment=True)
-
     return render_template('index.html')
+
+@app.route('/process', methods=['POST'])
+def process_file():
+    if 'file' not in request.files:
+        return "No file uploaded!"
+    file = request.files['file']
+    if file.filename == '':
+        return "No file selected!"
+
+    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(filepath)
+
+    # Read Excel file
+    df = pd.read_excel(filepath)
+
+    # Check required columns
+    required_cols = ['Roll No','Name','Session1','Session2','Attendance','Assignments']
+    for col in required_cols:
+        if col not in df.columns:
+            return f"Missing column: {col}"
+
+    # Apply the JS logic for each row
+    df['Total'] = df.apply(lambda r: calculate_total_marks(
+        r['Session1'], r['Session2'], r['Attendance'], r['Assignments']), axis=1)
+
+    df['Processed'] = 'Yes'
+
+    # Save processed file
+    output_path = os.path.join(UPLOAD_FOLDER, 'processed_' + file.filename)
+    df.to_excel(output_path, index=False)
+
+    return send_file(output_path, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(debug=True)
